@@ -29,10 +29,12 @@ const TESTS = [
   {group:"🔑 招待コード・スタッフ",id:"b07",label:"招待コードを発行できる"},
   {id:"b08",label:"スタッフアカウントを招待コードで登録できる"},
   {id:"b09",label:"スタッフが正しいcompany_idで登録されている"},
-  {group:"🔒 データ分離",id:"b10",label:"管理者は自社の設定だけ見える"},
+  {group:"🔒 データ分離（完全テスト）",id:"b10",label:"管理者は自社の設定だけ見える"},
   {id:"b11",label:"スタッフは自社のデータだけ見える"},
-  {id:"b12",label:"他社のデータにアクセスできない"},
-  {group:"🗑 後片付け",id:"b13",label:"テストデータを全て削除する"},
+  {id:"b12",label:"別会社Bのデータを作成する"},
+  {id:"b13",label:"会社Aから会社Bの設定が見えない"},
+  {id:"b14",label:"会社Aから会社Bのメンバーが見えない"},
+  {group:"🗑 後片付け",id:"b15",label:"テストデータを全て削除する"},
 ];
 
 function App(){
@@ -145,20 +147,41 @@ function App(){
     setStatus("b10","pass","自社設定のみ取得OK","ok");
 
     setStatus("b11","running");
-    setStatus("b11","pass","自社データのみ取得OK","ok");
+    const{data:staffDocs}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=company_id");
+    if(staffDocs&&staffDocs.every(s=>String(s.company_id)===String(cid))){setStatus("b11","pass","スタッフは自社データのみ取得OK","ok");}
+    else{setStatus("b11","fail","スタッフに他社データが見えています","error");finish();return;}
 
+    // 別会社Bを作成してデータ分離をテスト
     setStatus("b12","running");
-    const{data:fs}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=company_id");
-    if(fs&&fs.every(s=>String(s.company_id)===String(cid))){setStatus("b12","pass","データ分離OK","ok");}
-    else{setStatus("b12","fail","他社データが混入","error");}
+    const companyBEmail="testB_"+Date.now()+"@test.com";
+    const{data:coB,error:ceBErr}=await api("POST","/rest/v1/companies",{name:"テスト会社B",owner_email:companyBEmail});
+    if(ceBErr||!coB){setStatus("b12","fail","会社B作成失敗","error");finish();return;}
+    const cidB=Array.isArray(coB)?coB[0].id:coB.id;
+    const{error:svB}=await api("POST","/rest/v1/company_settings",{name:"会社Bの設定",zipcode:"000-0000",address:"大阪府テスト市",tel:"06-0000-0000",invoice:"T9999999999999",bank_name:"B銀行",bank_branch:"B支店",bank_type:"普通",bank_no:"9999999",bank_holder:"テストB",tax_rate:10,company_id:cidB});
+    if(svB){setStatus("b12","fail","会社B設定保存失敗","error");finish();return;}
+    setStatus("b12","pass","別会社Bのデータ作成成功 id="+cidB,"ok");
 
     setStatus("b13","running");
+    const{data:crossCheck}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=company_id");
+    const leaked=crossCheck&&crossCheck.some(s=>String(s.company_id)===String(cidB));
+    if(leaked){setStatus("b13","fail","会社Aから会社Bの設定が見えています！データが混ざっています","error");finish();return;}
+    setStatus("b13","pass","会社Aから会社Bの設定は見えない ✓","ok");
+
+    setStatus("b14","running");
+    const{data:memberCrossCheck}=await api("GET","/rest/v1/members?company_id=eq."+cid+"&select=company_id");
+    const memberLeaked=memberCrossCheck&&memberCrossCheck.some(s=>String(s.company_id)===String(cidB));
+    if(memberLeaked){setStatus("b14","fail","会社Aから会社Bのメンバーが見えています","error");finish();return;}
+    setStatus("b14","pass","会社Aから会社Bのメンバーは見えない ✓","ok");
+
+    setStatus("b15","running");
     await api("DELETE","/rest/v1/company_settings?company_id=eq."+cid);
+    await api("DELETE","/rest/v1/company_settings?company_id=eq."+cidB);
     await api("DELETE","/rest/v1/invite_codes?company_id=eq."+cid);
     await api("DELETE","/rest/v1/members?email=eq."+adminEmail);
     await api("DELETE","/rest/v1/members?email=eq."+staffEmail);
     await api("DELETE","/rest/v1/companies?id=eq."+cid);
-    setStatus("b13","pass","テストデータ全削除完了","ok");
+    await api("DELETE","/rest/v1/companies?id=eq."+cidB);
+    setStatus("b15","pass","テストデータ全削除完了","ok");
 
     setRunning(false);setDone(true);
     addLog("\n=== テスト完了 ===");
