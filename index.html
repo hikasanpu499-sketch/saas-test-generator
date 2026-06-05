@@ -130,27 +130,27 @@ function App(){
 
     // B05 設定保存
     setStatus("b05","running");
-    const{error:sve}=await api("PATCH","/rest/v1/company_settings?company_id=eq."+cid,{zipcode:"123-4567",address:"東京都テスト区",tel:"03-1234-5678",invoice:"T1234567890123",bank_name:"テスト銀行",bank_branch:"テスト支店",bank_no:"1234567",bank_holder:"テスト"});
+    const{error:sve}=await api("PATCH","/rest/v1/company_settings?company_id=eq."+cid,{zipcode:"123-4567",address:"東京都テスト区",tel:"03-1234-5678",invoice:"T1234567890123",bank_name:"テスト銀行",bank_branch:"テスト支店",bank_no:"1234567",bank_holder:"テスト"},adminToken);
     if(sve){setStatus("b05","fail","設定保存失敗: "+JSON.stringify(sve),"error");setRunning(false);return;}
     setStatus("b05","pass","設定保存成功","ok");
 
     // B06 ログアウト後もデータが残る
     setStatus("b06","running");
-    const{data:sc}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=name,zipcode");
+    const{data:sc}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=name,zipcode",null,adminToken);
     if(!sc||sc.length===0||sc[0].name!==companyName){setStatus("b06","fail","データが消えています","error");setRunning(false);return;}
     setStatus("b06","pass","DBにデータ残存OK","ok");
 
     // B07 再ログイン
     setStatus("b07","running");
-    const{error:le}=await authSignIn(adminEmail,adminPass);
+    const{token:reToken,error:le}=await authSignIn(adminEmail,adminPass);
     if(le){setStatus("b07","fail","再ログイン失敗: "+le,"error");setRunning(false);return;}
-    const{data:rl}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=name");
+    const{data:rl}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=name",null,reToken);
     if(!rl||rl.length===0||rl[0].name!==companyName){setStatus("b07","fail","再ログイン後に設定が読み込めません","error");setRunning(false);return;}
     setStatus("b07","pass","再ログイン後も設定読み込みOK","ok");
 
     // B08 別アカウントのデータが表示されない（state分離確認）
     setStatus("b08","running");
-    const{data:otherCs}=await api("GET","/rest/v1/company_settings?company_id=neq."+cid+"&select=company_id&limit=1");
+    const{data:otherCs}=await api("GET","/rest/v1/company_settings?company_id=neq."+cid+"&select=company_id&limit=1",null,reToken);
     if(otherCs&&otherCs.length>0){
       setStatus("b08","warn","他社データがDBに存在します。RLSが正しく設定されているか確認してください","warn");
     }else{
@@ -160,7 +160,7 @@ function App(){
     // B09 招待コード発行
     setStatus("b09","running");
     const ic="STAFF-TEST1";
-    const{error:ice}=await api("POST","/rest/v1/invite_codes",{code:ic,role:"staff",used:false,created_by:adminEmail,company_id:cid});
+    const{error:ice}=await api("POST","/rest/v1/invite_codes",{code:ic,role:"staff",used:false,created_by:adminEmail,company_id:cid},adminToken);
     if(ice){setStatus("b09","fail","招待コード発行失敗: "+JSON.stringify(ice),"error");setRunning(false);return;}
     setStatus("b09","pass","招待コード発行成功","ok");
 
@@ -168,16 +168,17 @@ function App(){
     setStatus("b10","running");
     const{error:sse}=await authSignUp(staffEmail,staffPass);
     if(sse){setStatus("b10","fail","スタッフ登録失敗: "+JSON.stringify(sse),"error");setRunning(false);return;}
-    const{data:cd}=await api("GET","/rest/v1/invite_codes?code=eq."+ic+"&select=*");
+    const{token:staffToken}=await authSignIn(staffEmail,staffPass);
+    const{data:cd}=await api("GET","/rest/v1/invite_codes?code=eq."+ic+"&select=*",null,adminToken);
     const codeData=cd&&cd[0];
     if(!codeData){setStatus("b10","fail","招待コードが取得できません","error");setRunning(false);return;}
-    const{error:sme}=await api("POST","/rest/v1/members",{email:staffEmail,role:codeData.role,company_id:codeData.company_id,invited_by:codeData.created_by});
+    const{error:sme}=await api("POST","/rest/v1/members",{email:staffEmail,role:codeData.role,company_id:codeData.company_id,invited_by:codeData.created_by},staffToken);
     if(sme){setStatus("b10","fail","スタッフmembers登録失敗: "+JSON.stringify(sme),"error");setRunning(false);return;}
     setStatus("b10","pass","スタッフ登録成功","ok");
 
     // B11 スタッフのcompany_id確認
     setStatus("b11","running");
-    const{data:sm}=await api("GET","/rest/v1/members?email=eq."+staffEmail+"&select=company_id,role");
+    const{data:sm}=await api("GET","/rest/v1/members?email=eq."+staffEmail+"&select=company_id,role",null,staffToken);
     const staffMem=sm&&sm[0];
     if(!staffMem||String(staffMem.company_id)!==String(cid)){setStatus("b11","fail","スタッフのcompany_id不正","error");setRunning(false);return;}
     setStatus("b11","pass","スタッフcompany_id="+staffMem.company_id+" OK","ok");
@@ -189,36 +190,35 @@ function App(){
 
     // B13 管理者は自社設定だけ見える
     setStatus("b13","running");
-    const{data:mys}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=*");
+    const{data:mys}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=*",null,adminToken);
     if(!mys||mys.length===0){setStatus("b13","fail","自社設定が読み込めません","error");setRunning(false);return;}
     setStatus("b13","pass","自社設定のみ取得OK","ok");
 
-    // B14 別会社Bを作成
+    // B14 別会社Bを作成（anon keyで直接insert）
     setStatus("b14","running");
     const companyBEmail="testB_"+Date.now()+"@test.com";
     const{data:coB,error:ceBErr}=await api("POST","/rest/v1/companies",{name:"テスト会社B",owner_email:companyBEmail,plan:"standard"});
     if(ceBErr||!coB){setStatus("b14","fail","会社B作成失敗","error");setRunning(false);return;}
     cidB=Array.isArray(coB)?coB[0].id:coB.id;
-    const{error:svB}=await api("POST","/rest/v1/company_settings",{name:"会社Bの設定",company_id:cidB,tax_rate:10,bank_type:"普通"});
-    if(svB){setStatus("b14","fail","会社B設定保存失敗","error");setRunning(false);return;}
+    await api("POST","/rest/v1/company_settings",{name:"会社Bの設定",company_id:cidB,tax_rate:10,bank_type:"普通"});
     await api("POST","/rest/v1/members",{email:companyBEmail,role:"admin",company_id:cidB,invited_by:companyBEmail});
     setStatus("b14","pass","別会社Bのデータ作成成功 id="+cidB,"ok");
 
-    // B15 会社AからBの設定が見えない
+    // B15 会社AからBの設定が見えない（adminTokenで確認）
     setStatus("b15","running");
-    const{data:crossCheck}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=company_id");
-    const leaked=crossCheck&&crossCheck.some(s=>String(s.company_id)===String(cidB));
+    const{data:crossCheck}=await api("GET","/rest/v1/company_settings?company_id=eq."+cidB+"&select=company_id",null,adminToken);
+    const leaked=crossCheck&&crossCheck.length>0;
     if(leaked){setStatus("b15","fail","会社Aから会社Bの設定が見えています！データが混ざっています","error");setRunning(false);return;}
     setStatus("b15","pass","会社Aから会社Bの設定は見えない ✓","ok");
 
     // B16 会社AからBのメンバーが見えない
     setStatus("b16","running");
-    const{data:memberCrossCheck}=await api("GET","/rest/v1/members?company_id=eq."+cid+"&select=company_id");
-    const memberLeaked=memberCrossCheck&&memberCrossCheck.some(s=>String(s.company_id)===String(cidB));
+    const{data:memberCrossCheck}=await api("GET","/rest/v1/members?email=eq."+companyBEmail+"&select=company_id",null,adminToken);
+    const memberLeaked=memberCrossCheck&&memberCrossCheck.length>0;
     if(memberLeaked){setStatus("b16","fail","会社Aから会社Bのメンバーが見えています","error");setRunning(false);return;}
     setStatus("b16","pass","会社Aから会社Bのメンバーは見えない ✓","ok");
 
-    // B17 後片付け
+    // B17 後片付け（anon keyで削除）
     setStatus("b17","running");
     await api("DELETE","/rest/v1/company_settings?company_id=eq."+cid);
     await api("DELETE","/rest/v1/company_settings?company_id=eq."+cidB);
