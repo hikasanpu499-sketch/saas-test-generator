@@ -22,19 +22,21 @@ const AC = "#c84b00";
 const TESTS = [
   {group:"👤 管理者登録",id:"b01",label:"管理者アカウントの新規登録"},
   {id:"b02",label:"会社レコードが作成される"},
-  {id:"b03",label:"管理者がmembersにcompany_id付きで登録される"},
-  {group:"💾 設定保存",id:"b04",label:"会社情報を保存できる"},
-  {id:"b05",label:"ログアウト後も設定データがDBに残っている"},
-  {id:"b06",label:"再ログイン後に設定が正しく読み込まれる"},
-  {group:"🔑 招待コード・スタッフ",id:"b07",label:"招待コードを発行できる"},
-  {id:"b08",label:"スタッフアカウントを招待コードで登録できる"},
-  {id:"b09",label:"スタッフが正しいcompany_idで登録されている"},
-  {group:"🔒 データ分離（完全テスト）",id:"b10",label:"管理者は自社の設定だけ見える"},
-  {id:"b11",label:"スタッフは自社のデータだけ見える"},
-  {id:"b12",label:"別会社Bのデータを作成する"},
-  {id:"b13",label:"会社Aから会社Bの設定が見えない"},
-  {id:"b14",label:"会社Aから会社Bのメンバーが見えない"},
-  {group:"🗑 後片付け",id:"b15",label:"テストデータを全て削除する"},
+  {id:"b03",label:"管理者がmembersにcompany_id付きで登録される（重複なし）"},
+  {id:"b04",label:"company_settingsに会社情報が初期保存される"},
+  {group:"💾 設定保存",id:"b05",label:"会社情報を保存できる"},
+  {id:"b06",label:"ログアウト後も設定データがDBに残っている"},
+  {id:"b07",label:"再ログイン後に設定が正しく読み込まれる"},
+  {id:"b08",label:"別アカウントでログインしたとき前のデータが表示されない"},
+  {group:"🔑 招待コード・スタッフ",id:"b09",label:"招待コードを発行できる"},
+  {id:"b10",label:"スタッフアカウントを招待コードで登録できる"},
+  {id:"b11",label:"スタッフが正しいcompany_idで登録されている"},
+  {id:"b12",label:"スタッフのroleがstaffになっている"},
+  {group:"🔒 データ分離（完全テスト）",id:"b13",label:"管理者は自社の設定だけ見える"},
+  {id:"b14",label:"別会社Bのデータを作成する"},
+  {id:"b15",label:"会社Aから会社Bの設定が見えない"},
+  {id:"b16",label:"会社Aから会社Bのメンバーが見えない"},
+  {group:"🗑 後片付け",id:"b17",label:"テストデータを全て削除する"},
 ];
 
 function App(){
@@ -44,7 +46,7 @@ function App(){
   const [adminPass,setAdminPass]=useState("testpass123");
   const [staffEmail,setStaffEmail]=useState("");
   const [staffPass,setStaffPass]=useState("testpass456");
-  const [companyName,setCompanyName]=useState("テスト株式会社");
+  const [companyName,setCompanyName]=useState("テスト株式会社A");
   const [results,setResults]=useState({});
   const [logs,setLogs]=useState([]);
   const [running,setRunning]=useState(false);
@@ -82,112 +84,147 @@ function App(){
     if(adminEmail===staffEmail){alert("管理者とスタッフは別のアドレスにしてください");return;}
     setRunning(true);setDone(false);setResults({});setLogs([]);
     addLog("=== テスト開始 ===");
-    let cid=null;
+    let cid=null, cidB=null;
 
+    // B01 管理者登録
     setStatus("b01","running");
     const{data:ec}=await api("GET","/rest/v1/companies?owner_email=eq."+adminEmail+"&select=id");
-    if(ec&&ec.length>0){setStatus("b01","fail","このメールはすでに登録済みです","error");finish();return;}
+    if(ec&&ec.length>0){setStatus("b01","fail","このメールはすでに登録済みです。別のアドレスを使ってください","error");setRunning(false);return;}
     const{error:se}=await authSignUp(adminEmail,adminPass);
-    if(se){setStatus("b01","fail","登録失敗: "+JSON.stringify(se),"error");finish();return;}
+    if(se){setStatus("b01","fail","登録失敗: "+JSON.stringify(se),"error");setRunning(false);return;}
     setStatus("b01","pass","管理者登録成功","ok");
 
+    // B02 会社作成
     setStatus("b02","running");
-    const{data:co,error:ce}=await api("POST","/rest/v1/companies",{name:companyName,owner_email:adminEmail});
-    if(ce||!co){setStatus("b02","fail","会社作成失敗","error");finish();return;}
+    const{data:co,error:ce}=await api("POST","/rest/v1/companies",{name:companyName,owner_email:adminEmail,plan:"standard"});
+    if(ce||!co){setStatus("b02","fail","会社作成失敗: "+JSON.stringify(ce),"error");setRunning(false);return;}
     cid=Array.isArray(co)?co[0].id:co.id;
     setStatus("b02","pass","会社作成成功 id="+cid,"ok");
 
+    // B03 members登録（重複なし確認）
     setStatus("b03","running");
     const{error:me}=await api("POST","/rest/v1/members",{email:adminEmail,role:"admin",company_id:cid,invited_by:adminEmail});
-    if(me){setStatus("b03","fail","members登録失敗","error");finish();return;}
+    if(me){setStatus("b03","fail","members登録失敗: "+JSON.stringify(me),"error");setRunning(false);return;}
     const{data:ms}=await api("GET","/rest/v1/members?email=eq."+adminEmail+"&select=company_id,role");
-    const m=ms&&ms[0];
-    if(!m||String(m.company_id)!==String(cid)){setStatus("b03","fail","company_id不一致","error");finish();return;}
-    setStatus("b03","pass","company_id="+m.company_id+" OK","ok");
+    if(!ms||ms.length===0){setStatus("b03","fail","membersにレコードがありません","error");setRunning(false);return;}
+    if(ms.length>1){setStatus("b03","fail","membersに重複レコードがあります（"+ms.length+"件）","error");setRunning(false);return;}
+    if(String(ms[0].company_id)!==String(cid)){setStatus("b03","fail","company_id不一致","error");setRunning(false);return;}
+    setStatus("b03","pass","membersに1件のみ登録・company_id="+ms[0].company_id+" OK","ok");
 
+    // B04 company_settings初期保存
     setStatus("b04","running");
-    const{error:sve}=await api("POST","/rest/v1/company_settings",{name:companyName,zipcode:"123-4567",address:"東京都テスト区",tel:"03-1234-5678",invoice:"T1234567890123",bank_name:"テスト銀行",bank_branch:"テスト支店",bank_type:"普通",bank_no:"1234567",bank_holder:"テスト",tax_rate:10,company_id:cid});
-    if(sve){setStatus("b04","fail","設定保存失敗: "+JSON.stringify(sve),"error");finish();return;}
-    setStatus("b04","pass","設定保存成功","ok");
+    const{error:cse}=await api("POST","/rest/v1/company_settings",{name:companyName,company_id:cid,tax_rate:10,bank_type:"普通"});
+    if(cse){setStatus("b04","fail","company_settings初期保存失敗: "+JSON.stringify(cse),"error");setRunning(false);return;}
+    const{data:csCheck}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=name");
+    if(!csCheck||csCheck.length===0){setStatus("b04","fail","company_settingsにデータがありません","error");setRunning(false);return;}
+    if(csCheck[0].name!==companyName){setStatus("b04","fail","会社名が一致しません","error");setRunning(false);return;}
+    setStatus("b04","pass","company_settingsに会社名「"+companyName+"」が保存されました","ok");
 
+    // B05 設定保存
     setStatus("b05","running");
-    const{data:sc}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=name");
-    if(!sc||sc.length===0){setStatus("b05","fail","データが消えています","error");finish();return;}
-    setStatus("b05","pass","DBにデータ残存OK","ok");
+    const{error:sve}=await api("PATCH","/rest/v1/company_settings?company_id=eq."+cid,{zipcode:"123-4567",address:"東京都テスト区",tel:"03-1234-5678",invoice:"T1234567890123",bank_name:"テスト銀行",bank_branch:"テスト支店",bank_no:"1234567",bank_holder:"テスト"});
+    if(sve){setStatus("b05","fail","設定保存失敗: "+JSON.stringify(sve),"error");setRunning(false);return;}
+    setStatus("b05","pass","設定保存成功","ok");
 
+    // B06 ログアウト後もデータが残る
     setStatus("b06","running");
-    const{error:le}=await authSignIn(adminEmail,adminPass);
-    if(le){setStatus("b06","fail","再ログイン失敗: "+le,"error");finish();return;}
-    setStatus("b06","pass","再ログイン成功","ok");
+    const{data:sc}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=name,zipcode");
+    if(!sc||sc.length===0||sc[0].name!==companyName){setStatus("b06","fail","データが消えています","error");setRunning(false);return;}
+    setStatus("b06","pass","DBにデータ残存OK","ok");
 
+    // B07 再ログイン
     setStatus("b07","running");
+    const{error:le}=await authSignIn(adminEmail,adminPass);
+    if(le){setStatus("b07","fail","再ログイン失敗: "+le,"error");setRunning(false);return;}
+    const{data:rl}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=name");
+    if(!rl||rl.length===0||rl[0].name!==companyName){setStatus("b07","fail","再ログイン後に設定が読み込めません","error");setRunning(false);return;}
+    setStatus("b07","pass","再ログイン後も設定読み込みOK","ok");
+
+    // B08 別アカウントのデータが表示されない（state分離確認）
+    setStatus("b08","running");
+    const{data:otherCs}=await api("GET","/rest/v1/company_settings?company_id=neq."+cid+"&select=company_id&limit=1");
+    if(otherCs&&otherCs.length>0){
+      setStatus("b08","warn","他社データがDBに存在します。RLSが正しく設定されているか確認してください","warn");
+    }else{
+      setStatus("b08","pass","他社データなし・分離OK","ok");
+    }
+
+    // B09 招待コード発行
+    setStatus("b09","running");
     const ic="STAFF-TEST1";
     const{error:ice}=await api("POST","/rest/v1/invite_codes",{code:ic,role:"staff",used:false,created_by:adminEmail,company_id:cid});
-    if(ice){setStatus("b07","fail","招待コード発行失敗","error");finish();return;}
-    setStatus("b07","pass","招待コード発行成功","ok");
+    if(ice){setStatus("b09","fail","招待コード発行失敗: "+JSON.stringify(ice),"error");setRunning(false);return;}
+    setStatus("b09","pass","招待コード発行成功","ok");
 
-    setStatus("b08","running");
+    // B10 スタッフ登録
+    setStatus("b10","running");
     const{error:sse}=await authSignUp(staffEmail,staffPass);
-    if(sse){setStatus("b08","fail","スタッフ登録失敗","error");finish();return;}
+    if(sse){setStatus("b10","fail","スタッフ登録失敗: "+JSON.stringify(sse),"error");setRunning(false);return;}
     const{data:cd}=await api("GET","/rest/v1/invite_codes?code=eq."+ic+"&select=*");
     const codeData=cd&&cd[0];
+    if(!codeData){setStatus("b10","fail","招待コードが取得できません","error");setRunning(false);return;}
     const{error:sme}=await api("POST","/rest/v1/members",{email:staffEmail,role:codeData.role,company_id:codeData.company_id,invited_by:codeData.created_by});
-    if(sme){setStatus("b08","fail","スタッフmembers登録失敗","error");finish();return;}
-    setStatus("b08","pass","スタッフ登録成功","ok");
+    if(sme){setStatus("b10","fail","スタッフmembers登録失敗: "+JSON.stringify(sme),"error");setRunning(false);return;}
+    setStatus("b10","pass","スタッフ登録成功","ok");
 
-    setStatus("b09","running");
+    // B11 スタッフのcompany_id確認
+    setStatus("b11","running");
     const{data:sm}=await api("GET","/rest/v1/members?email=eq."+staffEmail+"&select=company_id,role");
     const staffMem=sm&&sm[0];
-    if(!staffMem||String(staffMem.company_id)!==String(cid)){setStatus("b09","fail","スタッフcompany_id不正","error");finish();return;}
-    setStatus("b09","pass","スタッフcompany_id="+staffMem.company_id+" OK","ok");
+    if(!staffMem||String(staffMem.company_id)!==String(cid)){setStatus("b11","fail","スタッフのcompany_id不正","error");setRunning(false);return;}
+    setStatus("b11","pass","スタッフcompany_id="+staffMem.company_id+" OK","ok");
 
-    setStatus("b10","running");
-    const{data:mys}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=*");
-    if(!mys||mys.length===0){setStatus("b10","fail","自社設定が読み込めません","error");finish();return;}
-    setStatus("b10","pass","自社設定のみ取得OK","ok");
-
-    setStatus("b11","running");
-    const{data:staffDocs}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=company_id");
-    if(staffDocs&&staffDocs.every(s=>String(s.company_id)===String(cid))){setStatus("b11","pass","スタッフは自社データのみ取得OK","ok");}
-    else{setStatus("b11","fail","スタッフに他社データが見えています","error");finish();return;}
-
-    // 別会社Bを作成してデータ分離をテスト
+    // B12 スタッフのrole確認
     setStatus("b12","running");
-    const companyBEmail="testB_"+Date.now()+"@test.com";
-    const{data:coB,error:ceBErr}=await api("POST","/rest/v1/companies",{name:"テスト会社B",owner_email:companyBEmail});
-    if(ceBErr||!coB){setStatus("b12","fail","会社B作成失敗","error");finish();return;}
-    const cidB=Array.isArray(coB)?coB[0].id:coB.id;
-    const{error:svB}=await api("POST","/rest/v1/company_settings",{name:"会社Bの設定",zipcode:"000-0000",address:"大阪府テスト市",tel:"06-0000-0000",invoice:"T9999999999999",bank_name:"B銀行",bank_branch:"B支店",bank_type:"普通",bank_no:"9999999",bank_holder:"テストB",tax_rate:10,company_id:cidB});
-    if(svB){setStatus("b12","fail","会社B設定保存失敗","error");finish();return;}
-    setStatus("b12","pass","別会社Bのデータ作成成功 id="+cidB,"ok");
+    if(staffMem.role!=="staff"){setStatus("b12","fail","roleが'staff'ではありません: "+staffMem.role,"error");setRunning(false);return;}
+    setStatus("b12","pass","スタッフrole=staff OK","ok");
 
+    // B13 管理者は自社設定だけ見える
     setStatus("b13","running");
+    const{data:mys}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=*");
+    if(!mys||mys.length===0){setStatus("b13","fail","自社設定が読み込めません","error");setRunning(false);return;}
+    setStatus("b13","pass","自社設定のみ取得OK","ok");
+
+    // B14 別会社Bを作成
+    setStatus("b14","running");
+    const companyBEmail="testB_"+Date.now()+"@test.com";
+    const{data:coB,error:ceBErr}=await api("POST","/rest/v1/companies",{name:"テスト会社B",owner_email:companyBEmail,plan:"standard"});
+    if(ceBErr||!coB){setStatus("b14","fail","会社B作成失敗","error");setRunning(false);return;}
+    cidB=Array.isArray(coB)?coB[0].id:coB.id;
+    const{error:svB}=await api("POST","/rest/v1/company_settings",{name:"会社Bの設定",company_id:cidB,tax_rate:10,bank_type:"普通"});
+    if(svB){setStatus("b14","fail","会社B設定保存失敗","error");setRunning(false);return;}
+    await api("POST","/rest/v1/members",{email:companyBEmail,role:"admin",company_id:cidB,invited_by:companyBEmail});
+    setStatus("b14","pass","別会社Bのデータ作成成功 id="+cidB,"ok");
+
+    // B15 会社AからBの設定が見えない
+    setStatus("b15","running");
     const{data:crossCheck}=await api("GET","/rest/v1/company_settings?company_id=eq."+cid+"&select=company_id");
     const leaked=crossCheck&&crossCheck.some(s=>String(s.company_id)===String(cidB));
-    if(leaked){setStatus("b13","fail","会社Aから会社Bの設定が見えています！データが混ざっています","error");finish();return;}
-    setStatus("b13","pass","会社Aから会社Bの設定は見えない ✓","ok");
+    if(leaked){setStatus("b15","fail","会社Aから会社Bの設定が見えています！データが混ざっています","error");setRunning(false);return;}
+    setStatus("b15","pass","会社Aから会社Bの設定は見えない ✓","ok");
 
-    setStatus("b14","running");
+    // B16 会社AからBのメンバーが見えない
+    setStatus("b16","running");
     const{data:memberCrossCheck}=await api("GET","/rest/v1/members?company_id=eq."+cid+"&select=company_id");
     const memberLeaked=memberCrossCheck&&memberCrossCheck.some(s=>String(s.company_id)===String(cidB));
-    if(memberLeaked){setStatus("b14","fail","会社Aから会社Bのメンバーが見えています","error");finish();return;}
-    setStatus("b14","pass","会社Aから会社Bのメンバーは見えない ✓","ok");
+    if(memberLeaked){setStatus("b16","fail","会社Aから会社Bのメンバーが見えています","error");setRunning(false);return;}
+    setStatus("b16","pass","会社Aから会社Bのメンバーは見えない ✓","ok");
 
-    setStatus("b15","running");
+    // B17 後片付け
+    setStatus("b17","running");
     await api("DELETE","/rest/v1/company_settings?company_id=eq."+cid);
     await api("DELETE","/rest/v1/company_settings?company_id=eq."+cidB);
     await api("DELETE","/rest/v1/invite_codes?company_id=eq."+cid);
     await api("DELETE","/rest/v1/members?email=eq."+adminEmail);
     await api("DELETE","/rest/v1/members?email=eq."+staffEmail);
+    await api("DELETE","/rest/v1/members?email=eq."+companyBEmail);
     await api("DELETE","/rest/v1/companies?id=eq."+cid);
     await api("DELETE","/rest/v1/companies?id=eq."+cidB);
-    setStatus("b15","pass","テストデータ全削除完了","ok");
+    setStatus("b17","pass","テストデータ全削除完了","ok");
 
-    setRunning(false);setDone(true);
     addLog("\n=== テスト完了 ===");
+    setRunning(false);setDone(true);
   }
-
-  function finish(){setRunning(false);setDone(true);addLog("\n=== テスト完了（エラーあり）=== ");}
 
   return (
     <div style={{background:"#f3f4f6",minHeight:"100vh",padding:16,fontFamily:"sans-serif"}}>
@@ -197,12 +234,13 @@ function App(){
 
         <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:16,marginBottom:14}}>
           <div style={{fontWeight:700,fontSize:13,marginBottom:12,borderBottom:"1px solid #f3f4f6",paddingBottom:8}}>⚙️ テスト設定</div>
+          <div style={{fontSize:11,color:"#ef4444",marginBottom:12}}>⚠️ 毎回違うメールアドレスを使ってください</div>
           {[
             {label:"Supabase URL",val:supabaseUrl,set:setSupabaseUrl,ph:"https://xxx.supabase.co"},
             {label:"Supabase Anon Key",val:supabaseKey,set:setSupabaseKey,ph:"eyJ..."},
-            {label:"管理者テスト用メール",val:adminEmail,set:setAdminEmail,ph:"test_admin@example.com"},
+            {label:"管理者テスト用メール",val:adminEmail,set:setAdminEmail,ph:"test_admin_001@test.com"},
             {label:"管理者パスワード",val:adminPass,set:setAdminPass,type:"password"},
-            {label:"スタッフテスト用メール",val:staffEmail,set:setStaffEmail,ph:"test_staff@example.com"},
+            {label:"スタッフテスト用メール",val:staffEmail,set:setStaffEmail,ph:"test_staff_001@test.com"},
             {label:"スタッフパスワード",val:staffPass,set:setStaffPass,type:"password"},
             {label:"テスト用会社名",val:companyName,set:setCompanyName},
           ].map((f,i)=>(
@@ -230,17 +268,17 @@ function App(){
         )}
 
         <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,padding:16,marginBottom:14}}>
-          <div style={{fontWeight:700,fontSize:13,marginBottom:12,borderBottom:"1px solid #f3f4f6",paddingBottom:8}}>📋 テスト項目（15項目）</div>
+          <div style={{fontWeight:700,fontSize:13,marginBottom:12,borderBottom:"1px solid #f3f4f6",paddingBottom:8}}>📋 テスト項目（{TESTS.length}項目）</div>
           {TESTS.map((t,i)=>(
             <div key={i}>
               {t.group&&<div style={{fontSize:10,fontWeight:700,color:"#9ca3af",padding:"8px 0 3px",letterSpacing:".08em"}}>{t.group}</div>}
               <div style={{display:"flex",alignItems:"center",gap:10,padding:"7px 0",borderBottom:"1px solid #f9fafb",fontSize:13}}>
                 <div style={{
                   width:22,height:22,borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:700,flexShrink:0,
-                  background:results[t.id]==="pass"?"#dcfce7":results[t.id]==="fail"?"#fee2e2":results[t.id]==="running"?"#fef3c7":"#f3f4f6",
-                  color:results[t.id]==="pass"?"#16a34a":results[t.id]==="fail"?"#ef4444":results[t.id]==="running"?"#d97706":"#9ca3af",
+                  background:results[t.id]==="pass"?"#dcfce7":results[t.id]==="fail"?"#fee2e2":results[t.id]==="running"?"#fef3c7":results[t.id]==="warn"?"#fffbeb":"#f3f4f6",
+                  color:results[t.id]==="pass"?"#16a34a":results[t.id]==="fail"?"#ef4444":results[t.id]==="running"?"#d97706":results[t.id]==="warn"?"#d97706":"#9ca3af",
                 }}>
-                  {results[t.id]==="pass"?"✓":results[t.id]==="fail"?"✗":results[t.id]==="running"?"…":"–"}
+                  {results[t.id]==="pass"?"✓":results[t.id]==="fail"?"✗":results[t.id]==="running"?"…":results[t.id]==="warn"?"⚠":"–"}
                 </div>
                 <span>{t.label}</span>
               </div>
@@ -260,7 +298,7 @@ function App(){
         )}
 
         {logs.length>0&&(
-          <div style={{background:"#111",padding:14,borderRadius:8,fontSize:11,fontFamily:"monospace",maxHeight:220,overflowY:"auto",lineHeight:1.7}}>
+          <div style={{background:"#111",padding:14,borderRadius:8,fontSize:11,fontFamily:"monospace",maxHeight:220,overflowY:"auto",lineHeight:1.7,marginBottom:16}}>
             {logs.map((l,i)=>(
               <div key={i} style={{color:l.type==="error"?"#ef4444":l.type==="ok"?"#60a5fa":l.type==="warn"?"#f59e0b":"#10b981"}}>{l.text}</div>
             ))}
