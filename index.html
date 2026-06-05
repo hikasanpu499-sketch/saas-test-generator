@@ -159,7 +159,7 @@ function App(){
 
     // B09 招待コード発行
     setStatus("b09","running");
-    const ic="STAFF-TEST1";
+    const ic="STAFF-"+Date.now();
     const{error:ice}=await api("POST","/rest/v1/invite_codes",{code:ic,role:"staff",used:false,created_by:adminEmail,company_id:cid},adminToken);
     if(ice){setStatus("b09","fail","招待コード発行失敗: "+JSON.stringify(ice),"error");setRunning(false);return;}
     setStatus("b09","pass","招待コード発行成功","ok");
