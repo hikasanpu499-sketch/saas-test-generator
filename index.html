@@ -180,7 +180,8 @@ function App(){
     setStatus("b11","running");
     const{data:sm}=await api("GET","/rest/v1/members?email=eq."+staffEmail+"&select=company_id,role",null,staffToken);
     const staffMem=sm&&sm[0];
-    if(!staffMem||String(staffMem.company_id)!==String(cid)){setStatus("b11","fail","スタッフのcompany_id不正","error");setRunning(false);return;}
+    if(!staffMem){setStatus("b11","fail","スタッフのmembersレコードが取得できません","error");setRunning(false);return;}
+    if(String(staffMem.company_id)!==String(cid)){setStatus("b11","fail","スタッフのcompany_id不正: "+staffMem.company_id+" (期待値: "+cid+")","error");setRunning(false);return;}
     setStatus("b11","pass","スタッフcompany_id="+staffMem.company_id+" OK","ok");
 
     // B12 スタッフのrole確認
